@@ -26,8 +26,57 @@ ONSHORE_PATH = CONFIGS_PATH / "onshorewind.yaml"
 SOLAR_PATH = CONFIGS_PATH / "solar.yaml"
 OFFSHORE_PATH = CONFIGS_PATH / "offshorewind.yaml"
 SUITABILITY_PATH = CONFIGS_PATH / "suitability.yaml"
-SNAKEMAKE_PATH = CONFIGS_PATH / "snakemake.yaml"
+SNAKEMAKE_PATH = CONFIGS_PATH / "config_snakemake.yaml"
 SAMPLE_RESULTS_PATH = ROOT_DIR / "src" / "sample-results.json"
+CUSTOM_STUDY_AREA_PATH = ROOT_DIR / "Raw_Spatial_Data" / "custom_study_area"
+
+GADM_SOURCE_OPTIONS = ("gadm", "wb")
+LANDCOVER_SOURCE_OPTIONS = ("openeo", "file")
+OSM_SOURCE_OPTIONS = ("overpass", "geofabrik")
+POPULATION_SOURCE_OPTIONS = ("worldpop", "file", "0")
+PROTECTED_AREAS_SOURCE_OPTIONS = ("WDPA", "file", "0")
+INPUT_AREA_OPTIONS = ("resource_grades", "available_land", "study_region")
+WEATHER_DATA_EXTEND_OPTIONS = (
+    "gadm_country",
+    "wb_country",
+    "bbox",
+    "downloaded_region",
+)
+LEGACY_WEATHER_DATA_EXTEND_OPTIONS = (
+    "study_region",
+    "geo_bounds",
+    "country_code",
+)
+
+
+def load_custom_study_area_names(
+    folder: Path = CUSTOM_STUDY_AREA_PATH,
+) -> List[str]:
+    """Return selectable region names from custom study-area GeoJSON files."""
+    target = Path(folder)
+    if not target.is_dir():
+        return []
+
+    names: set[str] = {
+        path.stem.strip()
+        for path in target.iterdir()
+        if path.is_file() and path.suffix.casefold() == ".geojson" and path.stem.strip()
+    }
+    manifest = target / "processed_areas_list.json"
+    if manifest.is_file():
+        try:
+            manifest_values = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            manifest_values = []
+        if isinstance(manifest_values, list):
+            names.update(
+                str(value).strip()
+                for value in manifest_values
+                if str(value).strip()
+                and (target / f"{str(value).strip()}.geojson").is_file()
+            )
+    return sorted(names, key=str.casefold)
+
 
 YAML_RT: Optional[YAML] = None  # type: ignore[assignment]
 if YAML is not None:
@@ -198,6 +247,11 @@ CONFIG_SECTION_DEFINITIONS: List[Dict[str, Any]] = [
         "description": "Administrative or custom study area inputs.",
         "parameters": [
             {
+                "key": "GADM_source",
+                "type": "string",
+                "description": "Administrative-boundary source ('gadm' or 'wb').",
+            },
+            {
                 "key": "GADM_region_name",
                 "type": "string",
                 "description": "Exact GADM name given a specific administrative level. Found in column NAME_(level) - e.g. NAME_1 .",
@@ -360,7 +414,7 @@ CONFIG_SECTION_DEFINITIONS: List[Dict[str, Any]] = [
             {
                 "key": "protected_areas_source",
                 "type": "string",
-                "description": "Protected areas source (WDPA or file).",
+                "description": "Protected areas source (WDPA, file, or 0 to disable).",
             },
             {
                 "key": "protected_areas_filename",
@@ -414,6 +468,33 @@ CONFIG_SECTION_DEFINITIONS: List[Dict[str, Any]] = [
         "description": "Weather data settings.",
         "parameters": [
             {
+                "key": "weather_data_folder",
+                "type": "string",
+                "description": "Directory where downloaded weather data is stored.",
+            },
+            {
+                "key": "weather_data_extend",
+                "type": "string",
+                "description": (
+                    "Weather download extent mode or a custom study-area filename."
+                ),
+            },
+            {
+                "key": "bbox",
+                "type": "array",
+                "description": "Bounding box [xmin, ymin, xmax, ymax] for bbox mode.",
+            },
+            {
+                "key": "weather_years",
+                "type": "mapping",
+                "description": "Download years and MM-DD start/end dates.",
+            },
+            {
+                "key": "ERA5_variables",
+                "type": "array",
+                "description": "ERA5 feature groups to download.",
+            },
+            {
                 "key": "weather_external_data_path",
                 "type": "string",
                 "description": "Optional external weather data directory.",
@@ -427,16 +508,6 @@ CONFIG_SECTION_DEFINITIONS: List[Dict[str, Any]] = [
                 "key": "weather_year",
                 "type": "number",
                 "description": "Weather dataset year.",
-            },
-            {
-                "key": "weather_data_extend",
-                "type": "string",
-                "description": "Weather download extent mode.",
-            },
-            {
-                "key": "weather_data_geo_bounds",
-                "type": "mapping",
-                "description": "Geographical bounds used when geo_bounds is selected.",
             },
             {
                 "key": "weather_bias_correction",
@@ -1008,6 +1079,11 @@ CONFIG_SNAKEMAKE_STAGE_FLAGS: List[Dict[str, str]] = [
         "description": "Execute suitability.py to grade resources.",
     },
     {
+        "key": "results_analysis",
+        "label": "Results Analysis",
+        "description": "Aggregate all selected exclusion outputs into tables and a GeoPackage.",
+    },
+    {
         "key": "weather_data_prep",
         "label": "Weather Data Prep",
         "description": "Prepare atlite-ready weather cut-outs.",
@@ -1058,17 +1134,28 @@ CONFIG_SNAKEMAKE_SECTION_DEFINITIONS: List[Dict[str, Any]] = [
             {
                 "key": "study_region_name",
                 "type": "array",
-                "description": "Region names for the run.",
-            },
-            {
-                "key": "scenario",
-                "type": "string",
-                "description": "Scenario name for the run.",
+                "description": (
+                    "Regions to run, loaded from GeoJSON files in "
+                    "Raw_Spatial_Data/custom_study_area."
+                ),
             },
             {
                 "key": "technologies",
                 "type": "array",
                 "description": "Technologies to process.",
+            },
+            {
+                "key": "technology_scenarios",
+                "type": "mapping",
+                "description": "Scenario names to run for each selected technology.",
+            },
+            {
+                "key": "scenarios",
+                "type": "array",
+                "description": (
+                    "Optional scenario list used when a technology has no "
+                    "technology-specific selection."
+                ),
             },
         ],
     },
@@ -1474,8 +1561,12 @@ def load_snakemake_sections() -> List[Dict[str, Any]]:
             "snakefile": "snakefile_dummy",
             "cores": "4",
             "study_region_name": "dummy_region",
-            "scenario": "dummy",
             "technologies": ["dummy1", "dumm2"],
+            "scenarios": [],
+            "technology_scenarios": {
+                "dummy1": ["dummy"],
+                "dumm2": ["dummy"],
+            },
             "weather_years": "2015",
             **{stage["key"]: True for stage in CONFIG_SNAKEMAKE_STAGE_FLAGS},
         },
@@ -1492,6 +1583,10 @@ def load_snakemake_sections() -> List[Dict[str, Any]]:
         stages = flattened.pop("stages", {})
         if isinstance(stages, Mapping):
             flattened.update(stages)
+        flattened.setdefault("scenarios", [])
+        flattened.setdefault("technology_scenarios", {})
+        for stage in CONFIG_SNAKEMAKE_STAGE_FLAGS:
+            flattened.setdefault(stage["key"], False)
         return _build_sections_from_data(
             flattened, CONFIG_SNAKEMAKE_SECTION_DEFINITIONS
         )
@@ -1509,6 +1604,31 @@ def load_sample_results() -> Dict[str, Any]:
         except Exception:
             pass
     return deepcopy(DEFAULT_RESULTS_DATA)
+
+
+def _scenario_values(value: Any) -> List[str]:
+    """Normalize a scenario scalar or sequence into non-empty names."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        values = [value]
+    elif isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        values = list(value)
+    else:
+        values = [value]
+    return [str(item).strip() for item in values if str(item).strip()]
+
+
+def resolve_technology_scenarios(document: Mapping[str, Any]) -> Dict[str, List[str]]:
+    """Resolve per-technology scenarios with ``scenarios`` as the fallback."""
+    technologies = _scenario_values(document.get("technologies"))
+    fallback = _scenario_values(document.get("scenarios"))
+    raw_mapping = document.get("technology_scenarios")
+    mapping = raw_mapping if isinstance(raw_mapping, Mapping) else {}
+    return {
+        technology: _scenario_values(mapping.get(technology, fallback))
+        for technology in technologies
+    }
 
 
 def validate_configuration_documents(
@@ -1581,8 +1701,55 @@ def validate_configuration_documents(
                 "The custom study area overrides the configured GADM region.",
             )
 
-        osm_source = str(config.get("OSM_source") or "").strip().lower()
-        if osm_source not in {"overpass", "geofabrik"}:
+        gadm_source = str(config.get("GADM_source") or "gadm").strip()
+        if gadm_source not in GADM_SOURCE_OPTIONS:
+            add(
+                "error",
+                "config.yaml",
+                "GADM_source",
+                "Administrative-boundary source must be 'gadm' or 'wb'.",
+            )
+
+        landcover_source = str(config.get("landcover_source") or "").strip()
+        if landcover_source and landcover_source not in LANDCOVER_SOURCE_OPTIONS:
+            add(
+                "error",
+                "config.yaml",
+                "landcover_source",
+                "Landcover source must be 'openeo', 'file', or blank.",
+            )
+
+        population_source = str(config.get("population_source") or "0").strip()
+        if population_source not in POPULATION_SOURCE_OPTIONS:
+            add(
+                "error",
+                "config.yaml",
+                "population_source",
+                "Population source must be 'worldpop', 'file', or 0.",
+            )
+
+        protected_areas_source = str(
+            config.get("protected_areas_source") or "0"
+        ).strip()
+        if protected_areas_source not in PROTECTED_AREAS_SOURCE_OPTIONS:
+            add(
+                "error",
+                "config.yaml",
+                "protected_areas_source",
+                "Protected-areas source must be 'WDPA', 'file', or 0.",
+            )
+
+        input_area = str(config.get("input_area") or "").strip()
+        if input_area and input_area not in INPUT_AREA_OPTIONS:
+            add(
+                "error",
+                "config.yaml",
+                "input_area",
+                "Input area must be resource_grades, available_land, or study_region.",
+            )
+
+        osm_source = str(config.get("OSM_source") or "").strip()
+        if osm_source not in OSM_SOURCE_OPTIONS:
             add(
                 "error",
                 "config.yaml",
@@ -1597,35 +1764,32 @@ def validate_configuration_documents(
                 "A Geofabrik folder name is required when using Geofabrik.",
             )
 
-        weather_extend = str(config.get("weather_data_extend") or "").strip().lower()
-        if weather_extend and weather_extend not in {
-            "study_region",
-            "geo_bounds",
-            "country_code",
-        }:
+        weather_extend = str(config.get("weather_data_extend") or "").strip()
+        if weather_extend in LEGACY_WEATHER_DATA_EXTEND_OPTIONS:
             add(
                 "error",
                 "config.yaml",
                 "weather_data_extend",
-                "Weather extent must be study_region, geo_bounds, or country_code.",
+                "Weather extent uses a retired value. Choose gadm_country, "
+                "wb_country, bbox, downloaded_region, or enter a custom study-area "
+                "filename.",
             )
-        if weather_extend == "geo_bounds":
-            bounds = config.get("weather_data_geo_bounds")
-            required_bounds = ("west", "south", "east", "north")
-            if not isinstance(bounds, Mapping) or any(
-                not nonempty(bounds.get(k)) for k in required_bounds
+        if weather_extend == "bbox":
+            bounds = config.get("bbox")
+            if (
+                not isinstance(bounds, Sequence)
+                or isinstance(bounds, (str, bytes, bytearray))
+                or len(bounds) != 4
             ):
                 add(
                     "error",
                     "config.yaml",
-                    "weather_data_geo_bounds",
-                    "Geo bounds require west, south, east, and north values.",
+                    "bbox",
+                    "Bounding-box mode requires [xmin, ymin, xmax, ymax].",
                 )
             else:
                 try:
-                    west, south, east, north = (
-                        float(bounds[k]) for k in required_bounds
-                    )
+                    west, south, east, north = (float(value) for value in bounds)
                     valid_order = west < east and south < north
                     valid_range = (
                         -180 <= west <= 180
@@ -1639,8 +1803,9 @@ def validate_configuration_documents(
                     add(
                         "error",
                         "config.yaml",
-                        "weather_data_geo_bounds",
-                        "Geo bounds must be numeric, ordered, and within valid longitude/latitude ranges.",
+                        "bbox",
+                        "Bounding-box values must be numeric, ordered, and within "
+                        "valid longitude/latitude ranges.",
                     )
 
         if enabled(config.get("solar_atlas")):
@@ -1659,19 +1824,22 @@ def validate_configuration_documents(
                     "A Solar Atlas measure is required when Solar Atlas is enabled.",
                 )
 
-    snakemake = as_mapping("snakemake.yaml")
-    if "snakemake.yaml" in documents:
+    snakemake = as_mapping("config_snakemake.yaml")
+    if "config_snakemake.yaml" in documents:
         if not nonempty(snakemake.get("study_region_name")):
             add(
                 "error",
-                "snakemake.yaml",
+                "config_snakemake.yaml",
                 "study_region_name",
                 "Select at least one study region.",
             )
-        if not nonempty(snakemake.get("scenario")):
-            add("error", "snakemake.yaml", "scenario", "Scenario name is required.")
         if not nonempty(snakemake.get("snakefile")):
-            add("error", "snakemake.yaml", "snakefile", "Snakefile path is required.")
+            add(
+                "error",
+                "config_snakemake.yaml",
+                "snakefile",
+                "Snakefile path is required.",
+            )
         technologies = snakemake.get("technologies", [])
         if isinstance(technologies, str):
             technologies = [technologies]
@@ -1685,9 +1853,43 @@ def validate_configuration_documents(
         if not technologies:
             add(
                 "error",
-                "snakemake.yaml",
+                "config_snakemake.yaml",
                 "technologies",
                 "Select at least one technology.",
+            )
+        raw_technology_scenarios = snakemake.get("technology_scenarios", {})
+        if raw_technology_scenarios is not None and not isinstance(
+            raw_technology_scenarios, Mapping
+        ):
+            add(
+                "error",
+                "config_snakemake.yaml",
+                "technology_scenarios",
+                "Technology scenarios must be a mapping of technology names to scenario lists.",
+            )
+            raw_technology_scenarios = {}
+        scenario_selections = resolve_technology_scenarios(snakemake)
+        unknown_technologies = sorted(
+            str(name)
+            for name in raw_technology_scenarios
+            if str(name) not in technologies
+        )
+        if unknown_technologies:
+            add(
+                "warning",
+                "config_snakemake.yaml",
+                "technology_scenarios",
+                "Scenario selections exist for unselected technologies: "
+                + ", ".join(unknown_technologies)
+                + ".",
+            )
+        if nonempty(snakemake.get("scenario")):
+            add(
+                "warning",
+                "config_snakemake.yaml",
+                "scenario",
+                "The singular 'scenario' setting is ignored; use technology_scenarios "
+                "or the global scenarios fallback.",
             )
         for technology in technologies:
             file_name = f"{technology}.yaml"
@@ -1697,22 +1899,88 @@ def validate_configuration_documents(
             ):
                 add(
                     "error",
-                    "snakemake.yaml",
+                    "config_snakemake.yaml",
                     "technologies",
                     f"Technology '{technology}' has no matching {file_name} configuration.",
                 )
+                continue
+            selected_scenarios = scenario_selections.get(technology, [])
+            if not selected_scenarios:
+                add(
+                    "error",
+                    "config_snakemake.yaml",
+                    "technology_scenarios",
+                    f"Select at least one scenario for technology '{technology}' or "
+                    "provide a global scenarios fallback.",
+                )
+                continue
+            if file_name in documents:
+                technology_config = as_mapping(file_name)
+                reference_scenario = str(
+                    technology_config.get("reference_scenario") or "ref"
+                ).strip()
+                additional = technology_config.get("additional_scenarios") or {}
+                additional_names = (
+                    [str(name) for name in additional]
+                    if isinstance(additional, Mapping)
+                    else []
+                )
+                available_scenarios = {reference_scenario, *additional_names}
+                invalid_scenarios = [
+                    name for name in selected_scenarios if name not in available_scenarios
+                ]
+                if invalid_scenarios:
+                    add(
+                        "error",
+                        "config_snakemake.yaml",
+                        "technology_scenarios",
+                        f"Technology '{technology}' does not define scenario(s): "
+                        + ", ".join(invalid_scenarios)
+                        + ".",
+                    )
 
         try:
             cores = int(snakemake.get("cores", 0))
         except (TypeError, ValueError):
             cores = 0
         if cores < 1:
-            add("error", "snakemake.yaml", "cores", "Core count must be at least 1.")
+            add(
+                "error",
+                "config_snakemake.yaml",
+                "cores",
+                "Core count must be at least 1.",
+            )
 
         stages = snakemake.get("stages", {})
         if not isinstance(stages, Mapping):
-            add("error", "snakemake.yaml", "stages", "Stages must be a YAML mapping.")
+            add(
+                "error",
+                "config_snakemake.yaml",
+                "stages",
+                "Stages must be a YAML mapping.",
+            )
             stages = {}
+        if enabled(stages.get("suitability")):
+            populated_selections = {
+                technology: set(scenario_selections.get(technology, []))
+                for technology in technologies
+                if scenario_selections.get(technology)
+            }
+            distinct_scenario_sets = {
+                frozenset(names) for names in populated_selections.values()
+            }
+            if len(distinct_scenario_sets) > 1:
+                details = "; ".join(
+                    f"{technology}: {', '.join(sorted(names))}"
+                    for technology, names in populated_selections.items()
+                )
+                add(
+                    "error",
+                    "config_snakemake.yaml",
+                    "technology_scenarios",
+                    "Suitability requires the same scenario set for every selected "
+                    f"technology ({details}).",
+                )
         dependencies = {
             "exclusion": ("spatial_data_prep",),
             "suitability": ("exclusion",),
@@ -1729,7 +1997,7 @@ def validate_configuration_documents(
             if missing:
                 add(
                     "warning",
-                    "snakemake.yaml",
+                    "config_snakemake.yaml",
                     stage,
                     f"Stage '{stage}' requires: {', '.join(missing)}.",
                 )
@@ -1741,7 +2009,7 @@ def validate_configuration_documents(
         if weather_stages and weather_years in (None, "", []):
             add(
                 "error",
-                "snakemake.yaml",
+                "config_snakemake.yaml",
                 "weather_years",
                 "Select at least one weather year for the enabled weather stages.",
             )
@@ -1928,10 +2196,25 @@ def save_sections_round_trip(path: Path, sections: List[Dict[str, Any]]) -> str:
     return Path(path).read_text(encoding="utf-8")
 
 
-def save_mapping_round_trip(path: Path, updates: Mapping[str, Any]) -> str:
-    """Merge an already structured mapping into a YAML document and save it."""
+def save_mapping_round_trip(
+    path: Path,
+    updates: Mapping[str, Any],
+    *,
+    remove_keys: Sequence[str] = (),
+    replace_keys: Sequence[str] = (),
+) -> str:
+    """Merge a mapping into YAML, optionally removing or replacing top-level keys."""
     store = RoundTripConfigStore(Path(path))
-    deep_update(store.document, updates)
+    for key in remove_keys:
+        store.document.pop(key, None)
+    merge_updates = CommentedMap()
+    replacement_names = set(replace_keys)
+    for key, value in updates.items():
+        if key in replacement_names:
+            store.document[key] = deepcopy(value)
+        else:
+            merge_updates[key] = value
+    deep_update(store.document, merge_updates)
     store.save()
     return Path(path).read_text(encoding="utf-8")
 

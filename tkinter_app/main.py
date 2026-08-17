@@ -6875,495 +6875,89 @@ class ResultsTab(ttk.Frame):
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(3, weight=1)
 
-        ttk.Label(
-            frame,
-            text="Run delete_scenario_results.py to remove generated files for a scenario.",
-            font=("Segoe UI", 12, "bold"),
-        ).grid(row=0, column=0, sticky="w")
-        ttk.Label(
-            frame,
-            text="Respond to prompts below when the script asks for scenario selection or confirmation.",
-            foreground="#555555",
-        ).grid(row=1, column=0, sticky="w", pady=(2, 10))
+import os
+import queue
+import sys
+import threading
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-        controls = ttk.Frame(frame)
-        controls.grid(row=2, column=0, sticky="ew", pady=(0, 8))
-        controls.columnconfigure(2, weight=1)
-        self.delete_run_button = ttk.Button(
-            controls,
-            text="Run delete_scenario_results.py",
-            command=self.handle_delete_run,
-        )
-        self.delete_run_button.grid(row=0, column=0, padx=(0, 6))
-        self.delete_stop_button = ttk.Button(
-            controls, text="Stop", command=self.handle_delete_stop, state="disabled"
-        )
-        self.delete_stop_button.grid(row=0, column=1, padx=(0, 6))
-        self.delete_status_label = ttk.Label(controls, text="Status: Idle")
-        self.delete_status_label.grid(row=0, column=2, sticky="w")
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+import geopandas as gpd  # noqa: F401  # Load GEOS before rasterio/GDAL on Windows.
 
-        log_frame = ttk.LabelFrame(frame, text="Script Output")
-        log_frame.grid(row=3, column=0, sticky="nsew")
-        log_frame.columnconfigure(0, weight=1)
-        log_frame.rowconfigure(0, weight=1)
-        self.delete_log_text = tk.Text(
-            log_frame, height=14, wrap="none", state="disabled", font=("Consolas", 10)
-        )
-        self.delete_log_text.grid(row=0, column=0, sticky="nsew")
-        log_scroll = ttk.Scrollbar(
-            log_frame, orient="vertical", command=self.delete_log_text.yview
-        )
-        log_scroll.grid(row=0, column=1, sticky="ns")
-        self.delete_log_text.configure(yscrollcommand=log_scroll.set)
-        for tag, color in {
-            "info": "#333333",
-            "success": "#1a7f37",
-            "warning": "#a66b00",
-            "error": "#b42318",
-            "input": "#0d5d9b",
-        }.items():
-            self.delete_log_text.tag_configure(tag, foreground=color)
+try:  # Optional ttkbootstrap theming
+    from ttkbootstrap import Style  # type: ignore
 
-        input_row = ttk.Frame(frame)
-        input_row.grid(row=4, column=0, sticky="ew", pady=(10, 0))
-        input_row.columnconfigure(1, weight=1)
-        ttk.Label(input_row, text="Send Input:").grid(
-            row=0, column=0, sticky="w", padx=(0, 6)
-        )
-        self.delete_input_entry = ttk.Entry(
-            input_row, textvariable=self.delete_input_var, state="disabled"
-        )
-        self.delete_input_entry.grid(row=0, column=1, sticky="ew")
-        self.delete_input_entry.bind("<Return>", self._handle_delete_send_event)
-        self.delete_send_button = ttk.Button(
-            input_row, text="Send", command=self.handle_delete_send, state="disabled"
-        )
-        self.delete_send_button.grid(row=0, column=2, padx=(6, 0))
-        self._set_delete_running_state(False)
+    HAVE_TTKBOOTSTRAP = True
+except Exception:  # pragma: no cover - optional dependency
+    HAVE_TTKBOOTSTRAP = False
+CURRENT_DIR = Path(__file__).resolve().parent
+PARENT_DIR = CURRENT_DIR.parent
+CONFIGS_DIR = PARENT_DIR / "configs"
+if str(CURRENT_DIR) not in sys.path:
+    sys.path.append(str(CURRENT_DIR))
+if str(PARENT_DIR) not in sys.path:
+    sys.path.append(str(PARENT_DIR))
+from data_loader import (  # type: ignore  # noqa: E402
+    load_initial_sections,
+    load_sample_results,
+)
+if __package__:
+    from .configuration_tab import ConfigurationTab  # noqa: E402
+    from .documentation_tab import DocumentationTab  # noqa: E402
+    from .results_tab import ResultsTab  # noqa: E402
+    from .run_tab import RunTab  # noqa: E402
+else:
+    from configuration_tab import ConfigurationTab  # type: ignore  # noqa: E402
+    from documentation_tab import DocumentationTab  # type: ignore  # noqa: E402
+    from results_tab import ResultsTab  # type: ignore  # noqa: E402
+    from run_tab import RunTab  # type: ignore  # noqa: E402
+from utils.initialization import (  # noqa: E402
+    available_example_countries,
+    initialize_config_templates,
+    preview_config_templates,
+)
+from utils.gadm_levels_to_geojson import (  # noqa: E402
+    GADMExtractionResult,
+    extract_gadm_levels,
+)
+REQUIRED_ACTIVE_CONFIGS = (
+    "config.yaml",
+    "onshorewind.yaml",
+    "solar.yaml",
+)
+OPTIONAL_ACTIVE_CONFIGS = (
+    "suitability.yaml",
+    "config_snakemake.yaml",
+)
 
-    def _format_command(self, cmd: List[str]) -> str:
-        if hasattr(shlex, "join"):
-            return shlex.join(cmd)
-        return " ".join(cmd)
+def missing_active_configs(configs_dir: Path = CONFIGS_DIR) -> List[Path]:
+    """Return initialized configuration files required by the main UI."""
+    return [
+        configs_dir / name
+        for name in REQUIRED_ACTIVE_CONFIGS
+        if not (configs_dir / name).exists()
+    ]
 
-    def _set_running_state(self, running: bool) -> None:
-        self.run_button.configure(state="disabled" if running else "normal")
-        self.stop_button.configure(state="normal" if running else "disabled")
 
-    def _update_status_labels(self) -> None:
-        self.status_label.configure(text=f"Status: {self.status.capitalize()}")
-        duration_text = "--"
-        if self.start_time:
-            end = self.end_time or time.time()
-            duration_text = f"{int(end - self.start_time)}s"
-        self.duration_label.configure(text=f"Duration: {duration_text}")
+def missing_optional_configs(configs_dir: Path = CONFIGS_DIR) -> List[Path]:
+    """Return optional configuration files that may be needed by later stages."""
+    return [
+        configs_dir / name
+        for name in OPTIONAL_ACTIVE_CONFIGS
+        if not (configs_dir / name).exists()
+    ]
 
-    def _append_log(self, level: str, message: str) -> None:
-        tag = level if level in {"info", "success", "warning", "error"} else "info"
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.log_text.configure(state="normal")
-        self.log_text.insert("end", f"[{timestamp}] {message}\n", tag)
-        self.log_text.configure(state="disabled")
-        self.log_text.see("end")
 
-    def _clear_log(self) -> None:
-        self.log_text.configure(state="normal")
-        self.log_text.delete("1.0", "end")
-        self.log_text.configure(state="disabled")
 
-    def _start_spinner(self) -> None:
-        self.progress_bar.configure(mode="indeterminate")
-        self.progress_bar.start(10)
 
-    def _stop_spinner(self) -> None:
-        self.progress_bar.stop()
-        self.progress_bar.configure(mode="determinate")
 
-    def _start_duration_timer(self) -> None:
-        self._cancel_duration_timer()
-        if self.status == "running":
-            self.after_id = self.after(1000, self._tick_duration)
 
-    def _cancel_duration_timer(self) -> None:
-        if self.after_id:
-            try:
-                self.after_cancel(self.after_id)
-            except tk.TclError:
-                pass
-        self.after_id = None
 
-    def _tick_duration(self) -> None:
-        self.after_id = None
-        if self.status == "running":
-            self._update_status_labels()
-            self.after_id = self.after(1000, self._tick_duration)
 
-    def _resolve_script_path(self, script_name: str) -> Path:
-        candidates = [
-            PARENT_DIR / script_name,
-            CURRENT_DIR / script_name,
-            PARENT_DIR / "scripts" / script_name,
-        ]
-        for candidate in candidates:
-            if candidate.exists():
-                return candidate
-        raise FileNotFoundError(
-            f"Could not find {script_name} in the expected locations."
-        )
 
-    def _resolve_results_json_path(self) -> Path:
-        base_dir = self.expected_output_dir or PARENT_DIR
-        json_path = base_dir / "aggregated_available_land.json"
-        try:
-            return json_path.resolve()
-        except Exception:
-            return json_path
 
-    def handle_run(self) -> None:
-        if self.runner.is_running():
-            return
-        try:
-            script_path = self._resolve_script_path("results_analysis.py")
-        except FileNotFoundError as exc:
-            message = str(exc)
-            self._append_log("error", message)
-            messagebox.showerror("Execution Error", message)
-            return
-        self.expected_output_dir = script_path.parent
-        self.status = "running"
-        self.stop_requested = False
-        self.progress.set(0)
-        self._clear_log()
-        self.clear_aggregated_results()
-        self.start_time = time.time()
-        self.end_time = None
-        self._set_running_state(True)
-        self._update_status_labels()
-        self._start_spinner()
-        self._start_duration_timer()
-        command = [sys.executable, "-u", str(script_path)]
-        self._append_log("info", f"Starting process: {self._format_command(command)}")
-        try:
-            self.runner.run(
-                self,
-                [str(part) for part in command],
-                cwd=self.expected_output_dir,
-                on_line=self._handle_process_output,
-                on_exit=self._handle_process_exit,
-            )
-        except Exception as exc:
-            self.runner.cancel()
-            self._stop_spinner()
-            self._cancel_duration_timer()
-            self.status = "error"
-            self.start_time = None
-            self.end_time = None
-            self._append_log("error", f"Failed to start process: {exc}")
-            self._set_running_state(False)
-            self._update_status_labels()
-            self.expected_output_dir = None
-            messagebox.showerror("Execution Error", f"Failed to start process:\n{exc}")
-
-    def handle_stop(self) -> None:
-        if not self.runner.is_running():
-            return
-        self.stop_requested = True
-        self.status = "stopping"
-        self._append_log("warning", "Stop requested. Waiting for process to exit...")
-        self._update_status_labels()
-        self.runner.stop()
-
-    def _handle_process_output(self, level: str, message: str) -> None:
-        tag = level if level in {"info", "success", "warning", "error"} else "info"
-        self._append_log(tag, message)
-
-    def _handle_process_exit(self, return_code: int) -> None:
-        self.runner.cancel()
-        self._stop_spinner()
-        self._cancel_duration_timer()
-        self.end_time = time.time()
-        if return_code == 0 and not self.stop_requested:
-            self.status = "completed"
-            self.progress.set(100)
-            self._append_log("success", "Process completed successfully.")
-            status, message, _ = self.display_aggregated_json(
-                self._resolve_results_json_path()
-            )
-            if status == "success":
-                self._append_log("success", message)
-            elif status in {"missing", "empty"}:
-                self._append_log("warning", message)
-            else:
-                self._append_log("error", message)
-        else:
-            self.status = "stopped" if self.stop_requested else "error"
-            self.progress.set(0)
-            if self.stop_requested:
-                self._append_log(
-                    "warning",
-                    f"Process exited with code {return_code} after stop request.",
-                )
-            else:
-                self._append_log("error", f"Process exited with code {return_code}.")
-        self._set_running_state(False)
-        self._update_status_labels()
-        self.stop_requested = False
-        self.expected_output_dir = None
-
-    def clear_aggregated_results(self) -> None:
-        self.current_aggregated_rows = []
-        if self.aggregated_tree:
-            for item in self.aggregated_tree.get_children():
-                self.aggregated_tree.delete(item)
-        self.latest_aggregated_path = None
-        self._apply_aggregated_filters()
-
-    def _populate_aggregated_tree(self, rows: List[Dict[str, Any]]) -> None:
-        if not self.aggregated_tree:
-            return
-        self.aggregated_tree.delete(*self.aggregated_tree.get_children())
-        for row in rows:
-            values = [
-                self._format_aggregated_value(row.get(col))
-                for col in self.aggregated_columns
-            ]
-            self.aggregated_tree.insert("", "end", values=values)
-
-    def _update_delete_status(self) -> None:
-        if self.delete_status_label:
-            self.delete_status_label.configure(
-                text=f"Status: {self.delete_status.capitalize()}"
-            )
-
-    def _set_delete_running_state(self, running: bool) -> None:
-        if self.delete_run_button:
-            self.delete_run_button.configure(state="disabled" if running else "normal")
-        if self.delete_stop_button:
-            self.delete_stop_button.configure(state="normal" if running else "disabled")
-        entry_state = "normal" if running else "disabled"
-        if self.delete_input_entry:
-            self.delete_input_entry.configure(state=entry_state)
-            if running:
-                self.delete_input_entry.focus_set()
-            else:
-                self.delete_input_var.set("")
-        if self.delete_send_button:
-            self.delete_send_button.configure(state=entry_state)
-
-    def _delete_clear_log(self) -> None:
-        if not self.delete_log_text:
-            return
-        self.delete_log_text.configure(state="normal")
-        self.delete_log_text.delete("1.0", "end")
-        self.delete_log_text.configure(state="disabled")
-
-    def _delete_append_log(self, level: str, message: str) -> None:
-        if not self.delete_log_text:
-            return
-        tag = level if level in {"info", "error", "warning", "input"} else "info"
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.delete_log_text.configure(state="normal")
-        self.delete_log_text.insert("end", f"[{timestamp}] {message}\n", tag)
-        self.delete_log_text.configure(state="disabled")
-        self.delete_log_text.see("end")
-
-    def handle_delete_run(self) -> None:
-        if self.delete_runner.is_running():
-            return
-        try:
-            script_path = self._resolve_script_path("delete_scenario_results.py")
-        except FileNotFoundError as exc:
-            message = str(exc)
-            self._delete_append_log("error", message)
-            messagebox.showerror("Execution Error", message)
-            return
-        self.delete_expected_dir = script_path.parent
-        self.delete_status = "running"
-        self._set_delete_running_state(True)
-        self._update_delete_status()
-        self._delete_clear_log()
-        command = [sys.executable, "-u", str(script_path)]
-        self._delete_append_log(
-            "info", f"Starting process: {self._format_command(command)}"
-        )
-        try:
-            self.delete_runner.run(
-                self,
-                [str(part) for part in command],
-                cwd=self.delete_expected_dir,
-                on_line=self._handle_delete_output,
-                on_exit=self._handle_delete_exit,
-            )
-        except Exception as exc:
-            self.delete_runner.cancel()
-            self.delete_status = "error"
-            self._update_delete_status()
-            self._set_delete_running_state(False)
-            self._delete_append_log("error", f"Failed to start process: {exc}")
-            self.delete_expected_dir = None
-            messagebox.showerror("Execution Error", f"Failed to start process:\n{exc}")
-
-    def handle_delete_stop(self) -> None:
-        if not self.delete_runner.is_running():
-            return
-        self.delete_status = "stopping"
-        self._update_delete_status()
-        self._delete_append_log(
-            "warning", "Stop requested. Waiting for process to exit..."
-        )
-        self.delete_runner.stop()
-
-    def handle_delete_send(self) -> None:
-        if not self.delete_runner.is_running():
-            return
-        text = self.delete_input_var.get()
-        if not text.strip():
-            return
-        try:
-            self.delete_runner.send_input(text)
-            self._delete_append_log("input", f">>> {text}")
-        except RuntimeError as exc:
-            self._delete_append_log("error", str(exc))
-            messagebox.showerror("Send Input Failed", str(exc))
-        finally:
-            self.delete_input_var.set("")
-
-    def _handle_delete_send_event(self, _event: tk.Event) -> str:
-        self.handle_delete_send()
-        return "break"
-
-    def _handle_delete_output(self, level: str, message: str) -> None:
-        self._delete_append_log(level, message)
-
-    def _handle_delete_exit(self, return_code: int) -> None:
-        self.delete_runner.cancel()
-        if return_code == 0 and self.delete_status != "stopping":
-            self.delete_status = "completed"
-            self._delete_append_log("success", "Process completed successfully.")
-        else:
-            if self.delete_status == "stopping":
-                self._delete_append_log(
-                    "warning",
-                    f"Process exited with code {return_code} after stop request.",
-                )
-                self.delete_status = "stopped"
-            else:
-                self._delete_append_log(
-                    "error", f"Process exited with code {return_code}."
-                )
-                self.delete_status = "error"
-        self._set_delete_running_state(False)
-        self._update_delete_status()
-        self.delete_expected_dir = None
-
-    def _handle_filter_change(self, _event: tk.Event) -> None:
-        self._apply_aggregated_filters()
-
-    def _apply_aggregated_filters(self) -> None:
-        filters = {
-            col: var.get().strip().lower()
-            for col, var in self.aggregated_filters.items()
-            if var.get().strip()
-        }
-        if not filters:
-            self._populate_aggregated_tree(self.current_aggregated_rows)
-            return
-        filtered_rows: List[Dict[str, Any]] = []
-        for row in self.current_aggregated_rows:
-            matches_all = True
-            for col, term in filters.items():
-                value = row.get(col)
-                compare = "" if value is None else str(value)
-                if term not in compare.lower():
-                    matches_all = False
-                    break
-            if matches_all:
-                filtered_rows.append(row)
-        self._populate_aggregated_tree(filtered_rows)
-
-    def _format_aggregated_value(self, value: Any) -> str:
-        if value is None:
-            return ""
-        if isinstance(value, float):
-            formatted = f"{value:.4f}".rstrip("0").rstrip(".")
-            return formatted if formatted else "0"
-        return str(value)
-
-    def _normalise_aggregated_rows(self, data: Any) -> List[Dict[str, Any]]:
-        rows: List[Dict[str, Any]] = []
-        if not isinstance(data, list):
-            return rows
-        for entry in data:
-            if not isinstance(entry, dict):
-                continue
-            scenario_val = entry.get("scenario")
-            tech_val = entry.get("technology")
-            scenario = "" if scenario_val is None else str(scenario_val)
-            technology = "" if tech_val is None else str(tech_val)
-            aggregated = entry.get("aggregated")
-            if isinstance(aggregated, dict):
-                rows.append(
-                    {
-                        "Scenario": scenario,
-                        "Technology": technology,
-                        "Region": "ALL",
-                        "eligibility_share_%": aggregated.get("eligibility_share_%"),
-                        "available_area_km2": aggregated.get("available_area_km2"),
-                        "power_potential_TW": aggregated.get("power_potential_TW"),
-                    }
-                )
-            regions = entry.get("regions")
-            if isinstance(regions, dict):
-                for region_name, metrics in regions.items():
-                    if not isinstance(metrics, dict):
-                        continue
-                    region = "" if region_name is None else str(region_name)
-                    rows.append(
-                        {
-                            "Scenario": scenario,
-                            "Technology": technology,
-                            "Region": region,
-                            "eligibility_share_%": metrics.get("eligibility_share_%"),
-                            "available_area_km2": metrics.get("available_area_km2"),
-                            "power_potential_TW": metrics.get("power_potential_TW"),
-                        }
-                    )
-        return rows
-
-    def _set_aggregated_rows(self, rows: List[Dict[str, Any]]) -> None:
-        self.current_aggregated_rows = rows
-        self._apply_aggregated_filters()
-
-    def display_aggregated_json(
-        self, json_path: Optional[Path] = None
-    ) -> Tuple[str, str, int]:
-        if not self.aggregated_tree:
-            return ("error", "Aggregated results view unavailable.", 0)
-        target = json_path or (PARENT_DIR / "aggregated_available_land.json")
-        try:
-            resolved = target.resolve()
-        except Exception:
-            resolved = target
-        self.clear_aggregated_results()
-        self.latest_aggregated_path = resolved
-        if not resolved.exists():
-            return ("missing", f"Aggregated results JSON not found: {resolved}", 0)
-        try:
-            raw_data = resolved.read_text(encoding="utf-8")
-            payload = json.loads(raw_data) if raw_data.strip() else []
-        except (OSError, json.JSONDecodeError) as exc:
-            self.clear_aggregated_results()
-            return (
-                "error",
-                f"Failed to load aggregated results from {resolved}: {exc}",
-                0,
-            )
-        rows = self._normalise_aggregated_rows(payload)
-        if not rows:
-            self.clear_aggregated_results()
-            return ("empty", f"No aggregated entries found in {resolved}", 0)
-        self._set_aggregated_rows(rows)
-        return ("success", f"Loaded {len(rows)} rows from {resolved}", len(rows))
 
 
 class ConfigurationSetupDialog(tk.Toplevel):
@@ -7372,20 +6966,30 @@ class ConfigurationSetupDialog(tk.Toplevel):
     def __init__(self, master: tk.Widget, on_complete: Callable[[], None]) -> None:
         super().__init__(master)
         self.title("Configuration Setup")
-        self.geometry("760x540")
-        self.minsize(680, 460)
+        self.geometry("820x700")
+        self.minsize(720, 620)
         self.transient(master)
         self.on_complete = on_complete
         self.source_var = tk.StringVar(value="default")
         self.country_var = tk.StringVar()
         self.overwrite_var = tk.BooleanVar(value=False)
+        self.prepare_study_areas_var = tk.BooleanVar(value=False)
+        self.gadm_input_var = tk.StringVar()
+        self.gadm_level_var = tk.IntVar(value=1)
+        self.gadm_output_var = tk.StringVar(
+            value=str(PARENT_DIR / "Raw_Spatial_Data" / "custom_study_area")
+        )
+        self.gadm_overwrite_var = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar()
+        self._setup_running = False
+        self._study_area_queue: queue.Queue[Tuple[Any, ...]] = queue.Queue()
+        self._study_area_after_id: Optional[str] = None
         self.countries = available_example_countries(CONFIGS_DIR)
         if self.countries:
             self.country_var.set(self.countries[0])
         self._build_ui()
         self._refresh_preview()
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.protocol("WM_DELETE_WINDOW", self._close)
         self.grab_set()
 
     def _build_ui(self) -> None:
@@ -7474,14 +7078,88 @@ class ConfigurationSetupDialog(tk.Toplevel):
             options, textvariable=self.status_var, foreground="#8A5A00", wraplength=440
         ).pack(side="left", padx=(14, 0))
 
+        study_area = ttk.LabelFrame(
+            body, text="Optional study-area preparation", padding=10
+        )
+        study_area.grid(row=5, column=0, sticky="ew", pady=(10, 0))
+        study_area.columnconfigure(0, weight=1)
+        ttk.Checkbutton(
+            study_area,
+            text="Split a GADM dataset into individual study-area GeoJSON files",
+            variable=self.prepare_study_areas_var,
+            command=self._toggle_study_area_controls,
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            study_area,
+            text=(
+                "Each named area at the selected administrative level is written to "
+                "Raw_Spatial_Data/custom_study_area and listed in "
+                "processed_areas_list.json."
+            ),
+            foreground="#555555",
+            wraplength=740,
+            justify="left",
+        ).grid(row=1, column=0, sticky="ew", pady=(3, 7))
+        study_controls = ttk.Frame(study_area)
+        study_controls.grid(row=2, column=0, sticky="ew")
+        study_controls.columnconfigure(1, weight=1)
+        ttk.Label(study_controls, text="GADM dataset:").grid(
+            row=0, column=0, sticky="w", pady=2
+        )
+        gadm_input_entry = ttk.Entry(study_controls, textvariable=self.gadm_input_var)
+        gadm_input_entry.grid(row=0, column=1, sticky="ew", padx=(8, 6), pady=2)
+        gadm_input_button = ttk.Button(
+            study_controls, text="Browse...", command=self._browse_gadm_input
+        )
+        gadm_input_button.grid(row=0, column=2, pady=2)
+        ttk.Label(study_controls, text="Administrative level:").grid(
+            row=1, column=0, sticky="w", pady=2
+        )
+        gadm_level_spinbox = ttk.Spinbox(
+            study_controls,
+            textvariable=self.gadm_level_var,
+            from_=0,
+            to=9,
+            increment=1,
+            width=6,
+        )
+        gadm_level_spinbox.grid(row=1, column=1, sticky="w", padx=(8, 6), pady=2)
+        ttk.Label(study_controls, text="Output folder:").grid(
+            row=2, column=0, sticky="w", pady=2
+        )
+        gadm_output_entry = ttk.Entry(study_controls, textvariable=self.gadm_output_var)
+        gadm_output_entry.grid(row=2, column=1, sticky="ew", padx=(8, 6), pady=2)
+        gadm_output_button = ttk.Button(
+            study_controls, text="Browse...", command=self._browse_gadm_output
+        )
+        gadm_output_button.grid(row=2, column=2, pady=2)
+        gadm_overwrite_check = ttk.Checkbutton(
+            study_controls,
+            text="Replace existing area files with matching names",
+            variable=self.gadm_overwrite_var,
+        )
+        gadm_overwrite_check.grid(
+            row=3, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=(3, 0)
+        )
+        self.study_area_widgets = (
+            gadm_input_entry,
+            gadm_input_button,
+            gadm_level_spinbox,
+            gadm_output_entry,
+            gadm_output_button,
+            gadm_overwrite_check,
+        )
+
         buttons = ttk.Frame(body)
-        buttons.grid(row=5, column=0, sticky="e", pady=(14, 0))
-        ttk.Button(buttons, text="Cancel", command=self.destroy).pack(
+        buttons.grid(row=6, column=0, sticky="e", pady=(14, 0))
+        ttk.Button(buttons, text="Cancel", command=self._close).pack(
             side="right", padx=(8, 0)
         )
-        ttk.Button(
+        self.initialize_button = ttk.Button(
             buttons, text="Initialize and Continue", command=self._initialize
-        ).pack(side="right")
+        )
+        self.initialize_button.pack(side="right")
+        self._toggle_study_area_controls()
         self._on_source_changed()
 
     def _selected_country(self) -> Optional[str]:
@@ -7495,6 +7173,75 @@ class ConfigurationSetupDialog(tk.Toplevel):
             state="readonly" if is_example and self.countries else "disabled"
         )
         self._refresh_preview()
+
+    def _close(self) -> None:
+        if self._setup_running:
+            return
+        self.destroy()
+
+    def _toggle_study_area_controls(self) -> None:
+        state = "normal" if self.prepare_study_areas_var.get() else "disabled"
+        for widget in self.study_area_widgets:
+            widget.configure(state=state)
+
+    def _browse_gadm_input(self) -> None:
+        selected = filedialog.askopenfilename(
+            parent=self,
+            title="Select GADM dataset",
+            initialdir=str(PARENT_DIR / "Raw_Spatial_Data" / "custom_study_area"),
+            filetypes=(
+                ("Geospatial files", "*.geojson *.json *.gpkg *.shp"),
+                ("GeoJSON", "*.geojson *.json"),
+                ("GeoPackage", "*.gpkg"),
+                ("Shapefile", "*.shp"),
+                ("All files", "*.*"),
+            ),
+        )
+        if selected:
+            self.gadm_input_var.set(selected)
+
+    def _browse_gadm_output(self) -> None:
+        selected = filedialog.askdirectory(
+            parent=self,
+            title="Select study-area output folder",
+            initialdir=self.gadm_output_var.get() or str(PARENT_DIR),
+        )
+        if selected:
+            self.gadm_output_var.set(selected)
+
+    @staticmethod
+    def _resolve_setup_path(value: str) -> Path:
+        expanded = Path(os.path.expandvars(value.strip())).expanduser()
+        if not expanded.is_absolute():
+            expanded = PARENT_DIR / expanded
+        return expanded.resolve()
+
+    def _study_area_options(self) -> Optional[Dict[str, Any]]:
+        if not self.prepare_study_areas_var.get():
+            return None
+        input_text = self.gadm_input_var.get().strip()
+        output_text = self.gadm_output_var.get().strip()
+        if not input_text:
+            raise ValueError("Select a GADM input dataset.")
+        if not output_text:
+            raise ValueError("Select a study-area output folder.")
+        input_path = self._resolve_setup_path(input_text)
+        if not input_path.is_file():
+            raise FileNotFoundError(f"GADM input file not found: {input_path}")
+        try:
+            level = int(self.gadm_level_var.get())
+        except (tk.TclError, TypeError, ValueError) as exc:
+            raise ValueError(
+                "Administrative level must be a non-negative integer."
+            ) from exc
+        if level < 0:
+            raise ValueError("Administrative level must be a non-negative integer.")
+        return {
+            "input_path": input_path,
+            "gadm_level": level,
+            "output_folder": self._resolve_setup_path(output_text),
+            "overwrite": self.gadm_overwrite_var.get(),
+        }
 
     def _template_pairs(self) -> List[Tuple[Path, Path]]:
         country = self._selected_country()
@@ -7553,6 +7300,11 @@ class ConfigurationSetupDialog(tk.Toplevel):
                 parent=self,
             )
             return
+        try:
+            study_area_options = self._study_area_options()
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Study-area preparation", str(exc), parent=self)
+            return
         confirm_discard = getattr(self.master, "_confirm_discard_unsaved", None)
         if callable(confirm_discard) and not confirm_discard(
             "reinitializing configuration files"
@@ -7568,17 +7320,97 @@ class ConfigurationSetupDialog(tk.Toplevel):
             )
             if not confirmed:
                 return
+        if study_area_options and study_area_options["overwrite"]:
+            confirmed = messagebox.askyesno(
+                "Replace Study-area Files",
+                "Replace existing GeoJSON files when their generated area names match?",
+                parent=self,
+            )
+            if not confirmed:
+                return
+        if study_area_options:
+            self._setup_running = True
+            self.initialize_button.configure(state="disabled")
+            self.status_var.set("Preparing study-area GeoJSON files...")
+            self._study_area_queue = queue.Queue()
+            worker = threading.Thread(
+                target=self._prepare_study_areas_worker,
+                args=(study_area_options, country, overwrite, pairs),
+                daemon=True,
+            )
+            worker.start()
+            self._poll_study_area_worker()
+            return
+        self._complete_initialization(country, overwrite, pairs, None)
+
+    def _prepare_study_areas_worker(
+        self,
+        options: Dict[str, Any],
+        country: Optional[str],
+        overwrite_configs: bool,
+        pairs: List[Tuple[Path, Path]],
+    ) -> None:
+        try:
+            result = extract_gadm_levels(
+                options["input_path"],
+                gadm_level=options["gadm_level"],
+                output_folder=options["output_folder"],
+                overwrite=options["overwrite"],
+            )
+        except Exception as exc:
+            self._study_area_queue.put(("error", str(exc)))
+            return
+        self._study_area_queue.put(
+            ("success", result, country, overwrite_configs, pairs)
+        )
+
+    def _poll_study_area_worker(self) -> None:
+        self._study_area_after_id = None
+        try:
+            item = self._study_area_queue.get_nowait()
+        except queue.Empty:
+            if self._setup_running:
+                self._study_area_after_id = self.after(
+                    100, self._poll_study_area_worker
+                )
+            return
+        if item[0] == "error":
+            self._study_area_failed(str(item[1]))
+            return
+        _, result, country, overwrite_configs, pairs = item
+        self._complete_initialization(
+            country, overwrite_configs, pairs, result
+        )
+
+    def _study_area_failed(self, detail: str) -> None:
+        self._setup_running = False
+        self.initialize_button.configure(state="normal")
+        self.status_var.set("Study-area preparation failed.")
+        messagebox.showerror("Study-area Preparation Failed", detail, parent=self)
+
+    def _complete_initialization(
+        self,
+        country: Optional[str],
+        overwrite: bool,
+        pairs: List[Tuple[Path, Path]],
+        study_area_result: Optional[GADMExtractionResult],
+    ) -> None:
         try:
             changed = initialize_config_templates(
                 CONFIGS_DIR, overwrite=overwrite, country=country
             )
         except Exception as exc:
+            self._setup_running = False
+            self.initialize_button.configure(state="normal")
             messagebox.showerror(
                 "Configuration Setup", f"Initialization failed:\n{exc}", parent=self
             )
             return
         missing = [target for _, target in pairs if not target.exists()]
         if missing:
+            self._setup_running = False
+            self.initialize_button.configure(state="normal")
+            self.status_var.set("Configuration initialization was incomplete.")
             messagebox.showerror(
                 "Configuration Setup",
                 "Initialization did not create:\n"
@@ -7589,7 +7421,14 @@ class ConfigurationSetupDialog(tk.Toplevel):
         created_message = f"Created or replaced {len(changed)} file(s)."
         if not changed:
             created_message = "All selected active files already existed."
+        if study_area_result is not None:
+            created_message += (
+                f"\n\nPrepared {len(study_area_result.area_names)} study area(s): "
+                f"{len(study_area_result.created_files)} written and "
+                f"{len(study_area_result.skipped_files)} kept."
+            )
         messagebox.showinfo("Configuration Setup", created_message, parent=self)
+        self._setup_running = False
         self.grab_release()
         self.destroy()
         self.on_complete()
@@ -7623,6 +7462,8 @@ class ConfigurationSetupRequiredTab(ttk.Frame):
         ttk.Button(card, text="Start Configuration Setup", command=open_setup).pack()
 
 
+
+
 class PythonScriptManagerApp(tk.Tk):
     """Main application window."""
 
@@ -7630,6 +7471,7 @@ class PythonScriptManagerApp(tk.Tk):
         super().__init__()
         self.title("Python Script Manager (Tkinter)")
         self.geometry("1200x780")
+        self.state("zoomed")
         if HAVE_TTKBOOTSTRAP:
             try:
                 self.style = Style(theme="litera", master=self)
@@ -7639,6 +7481,7 @@ class PythonScriptManagerApp(tk.Tk):
         self.sample_results = load_sample_results()
         self._setup_dialog: Optional[ConfigurationSetupDialog] = None
         self._setup_prompted = False
+        self._optional_config_warning_shown = False
         outer = ttk.Frame(self)
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(0, weight=1)
@@ -7685,7 +7528,29 @@ class PythonScriptManagerApp(tk.Tk):
         self.run_tab = RunTab(self.notebook, self.config_tab, self.results_tab)
         self.notebook.add(self.run_tab, text="Run")
         self.notebook.add(self.results_tab, text="Results")
-        self.notebook_tabs.extend([self.run_tab, self.results_tab])
+        self.documentation_tab = DocumentationTab(self.notebook)
+        self.notebook.add(self.documentation_tab, text="Documentation")
+        self.notebook_tabs.extend(
+            [self.run_tab, self.results_tab, self.documentation_tab]
+        )
+        self.after(150, self._warn_about_missing_optional_configs)
+
+    def _warn_about_missing_optional_configs(self) -> None:
+        if self._optional_config_warning_shown:
+            return
+        missing = missing_optional_configs()
+        if not missing:
+            return
+        self._optional_config_warning_shown = True
+        missing_names = ", ".join(path.name for path in missing)
+        messagebox.showwarning(
+            "Optional Configuration Not Created",
+            "The following optional configuration file(s) have not been created: "
+            f"{missing_names}. They are not required for initial setup, but may be "
+            "required later for suitability analysis, energy profiles, or Snakemake "
+            "workflows.",
+            parent=self,
+        )
 
     def _has_unsaved_configuration_changes(self) -> bool:
         tab = getattr(self, "config_tab", None)
