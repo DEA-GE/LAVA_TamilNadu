@@ -19,6 +19,9 @@ from utils.region_names import canonical_region_name
 with open("configs/config_snakemake.yaml", "r", encoding="utf-8") as f:
     config_snakemake = yaml.load(f, Loader=yaml.FullLoader)
 
+with open("configs/config.yaml", "r", encoding="utf-8") as f:
+    config_main = yaml.load(f, Loader=yaml.FullLoader)
+
 
 #define parameters , keep them in list as it iterates, multiple input can be included. 
 configured_regions = config_snakemake["study_region_name"]

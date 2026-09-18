@@ -80,7 +80,23 @@ PARAMETER_PICKERS: Dict[str, str] = {
     "weather_data_extend": "filename", "weather_external_data_path": "directory",
     "additional_exclusion_polygons_folder_name": "folder_name",
     "additional_exclusion_rasters_folder_name": "folder_name",
+    "additional_inclusion_polygons_folder_name": "folder_name",
+    "additional_inclusion_rasters_folder_name": "folder_name",
     "OSM_folder_name": "folder_name", "snakefile": "project_file",
+}
+PARAMETER_FOLDER_ROOTS: Dict[str, Path] = {
+    "additional_exclusion_polygons_folder_name": (
+        PARENT_DIR / "Raw_Spatial_Data" / "additional_exclusion_polygons"
+    ),
+    "additional_exclusion_rasters_folder_name": (
+        PARENT_DIR / "Raw_Spatial_Data" / "additional_exclusion_rasters"
+    ),
+    "additional_inclusion_polygons_folder_name": (
+        PARENT_DIR / "Raw_Spatial_Data" / "additional_inclusion_polygons"
+    ),
+    "additional_inclusion_rasters_folder_name": (
+        PARENT_DIR / "Raw_Spatial_Data" / "additional_inclusion_rasters"
+    ),
 }
 PARAMETER_UNITS: Dict[str, str] = {
     "deployment_density": "MW/km2", "resolution_manual": "m", "resolution_landcover": "degrees",
@@ -233,6 +249,19 @@ def rebuild_from_widgets(
         result = deepcopy(original)
         for key, value in original.items():
             child_path = f"{path}.{key}" if path else key
+            # Raster eligibility codes are integers even when an earlier bad
+            # save left string values in the YAML list. Trusting the first
+            # existing item as the type sample would otherwise save the
+            # corrected comma-separated editor input as quoted strings again.
+            if key == "codes" and child_path.endswith("additional_inclusion_rasters.defaults.codes"):
+                var = registry.get(child_path)
+                if var is not None:
+                    tokens = [item.strip() for item in var.get().split(",") if item.strip()]
+                    try:
+                        result[key] = type(value)(int(item) for item in tokens)
+                    except ValueError:
+                        result[key] = deepcopy(value)
+                    continue
             result[key] = rebuild_from_widgets(value, registry, child_path)
         return result
 
@@ -1503,10 +1532,12 @@ class ConfigurationTab(ttk.Frame):
         initial_dir = (
             custom_study_area_root
             if picker == "custom_study_area_file"
-            else PARENT_DIR
+            else PARAMETER_FOLDER_ROOTS.get(key, PARENT_DIR)
         )
         if current:
-            candidate = Path(current)
+            candidate = PARAMETER_FOLDER_ROOTS.get(key, PARENT_DIR) / current
+            if picker != "folder_name":
+                candidate = Path(current)
             if not candidate.is_absolute():
                 candidate = PARENT_DIR / candidate
             if candidate.exists():
@@ -1654,6 +1685,10 @@ class ConfigurationTab(ttk.Frame):
                     listbox.delete(index)
                 emit_selection()
 
+            def remove_selected_event(_event: tk.Event) -> str:
+                remove_selected()
+                return "break"
+
             def add_all_items() -> None:
                 existing = {
                     str(listbox.get(index)) for index in range(listbox.size())
@@ -1671,6 +1706,8 @@ class ConfigurationTab(ttk.Frame):
             ttk.Button(frame, text="Remove", command=remove_selected).grid(
                 row=1, column=2, padx=(4, 0), pady=(4, 0)
             )
+            listbox.bind("<Delete>", remove_selected_event)
+            listbox.bind("<BackSpace>", remove_selected_event)
             if editable_choices:
                 ttk.Button(frame, text="Add all", command=add_all_items).grid(
                     row=1, column=3, padx=(4, 0), pady=(4, 0)
@@ -3000,17 +3037,30 @@ class ConfigurationTab(ttk.Frame):
         info = self.extra_files.get(label)
         if not info:
             return False
+
+        # Always synchronize visible structured controls before consulting the
+        # dirty flag.  Tk list edits (especially deletion followed immediately
+        # by Save) must not depend on a virtual selection event having fired.
+        sections_data: Optional[List[Dict[str, Any]]] = info.get("sections")
+        has_structured_sections = sections_data is not None
+        mode_var: Optional[tk.StringVar] = info.get("mode_var")
+        if (
+            has_structured_sections
+            and mode_var is not None
+            and mode_var.get() != "raw"
+        ):
+            self._update_extra_sections_from_controls(label)
+            info["dirty"] = not self._editor_states_equal(
+                info.get("sections"), info.get("sections_baseline")
+            )
         if not info.get("dirty"):
             return True
         if validate and not self.validate_before_action(label, "save"):
             return False
         kind = info.get("kind")
-        sections_data: Optional[List[Dict[str, Any]]] = info.get("sections")
-        has_structured_sections = sections_data is not None
         text_widget: Optional[tk.Text] = info.get("text_widget")
 
         if has_structured_sections:
-            mode_var: Optional[tk.StringVar] = info.get("mode_var")
             if mode_var is not None and mode_var.get() == "raw":
                 if not self._sync_extra_text_to_visual(label):
                     return False

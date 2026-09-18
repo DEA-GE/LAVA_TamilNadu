@@ -1,24 +1,24 @@
 # General
 #region parameters.
 
-study_region_name: [Hovedstaden, Midtjylland, Nordjylland, Sjælland, Syddanmark]
+study_region_name: [Chennai_North, Chennai_South, Coimbatore, Erode, Madurai, Tirunelveli, Trichy, Vellore, Villupuram]
 technologies: [onshorewind, solar]
 technology_scenarios:
   solar:
-    - Snaketest
+    - 9BA
   onshorewind:
-    - Snaketest
+    - 9BA
 cores: 4
 snakefile: snakemake/Snakefile
-weather_years: [2019]
+weather_years: [2025]
 
 stages:
-  spatial_data_prep: true
-  exclusion: true
+  spatial_data_prep: false
+  exclusion: false
   suitability: false
   results_analysis: false
   timeseries: false
-  weather_data_prep: false
-  weather_bias_adjust: false
-  energy_profiles: false
+  weather_data_prep: true
+  weather_bias_adjust: true
+  energy_profiles: true
 scenarios: []

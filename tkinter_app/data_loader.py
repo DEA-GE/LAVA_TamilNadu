@@ -452,33 +452,57 @@ CONFIG_SECTION_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "spatial_paths",
         "displayName": "Spatial Paths",
-        "description": "Projection and optional spatial input locations.",
+        "description": "Projection and optional model-area input locations.",
         "parameters": [
             {
                 "key": "CRS_manual",
                 "type": "nullable_string",
                 "description": "Manual CRS override; blank selects the local UTM zone.",
             },
+        ],
+    },
+    {
+        "name": "additional_spatial_layers",
+        "displayName": "Additional Spatial Layers",
+        "description": (
+            "Optional folders containing extra exclusion and inclusion layers."
+        ),
+        "parameters": [
             {
                 "key": "additional_exclusion_polygons_folder_name",
                 "type": "nullable_string",
-                "description": "Folder for extra exclusion polygons.",
+                "description": (
+                    "Subfolder under Raw_Spatial_Data/additional_exclusion_polygons."
+                ),
             },
             {
                 "key": "additional_exclusion_rasters_folder_name",
                 "type": "nullable_string",
-                "description": "Folder for extra exclusion rasters.",
+                "description": (
+                    "Subfolder under Raw_Spatial_Data/additional_exclusion_rasters."
+                ),
             },
             {
                 "key": "additional_inclusion_polygons_folder_name",
                 "type": "nullable_string",
-                "description": "Folder for extra inclusion polygons.",
+                "description": (
+                    "Subfolder under Raw_Spatial_Data/additional_inclusion_polygons."
+                ),
             },
             {
                 "key": "additional_inclusion_rasters_folder_name",
                 "type": "nullable_string",
-                "description": "Folder for extra inclusion rasters.",
+                "description": (
+                    "Subfolder under Raw_Spatial_Data/additional_inclusion_rasters."
+                ),
             },
+        ],
+    },
+    {
+        "name": "model_areas",
+        "displayName": "Model Areas",
+        "description": "Optional model-area input location.",
+        "parameters": [
             {
                 "key": "model_areas_filename",
                 "type": "nullable_string",

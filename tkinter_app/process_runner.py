@@ -15,6 +15,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 class ProcessRunner:
     """Run subprocesses on a background thread and stream output back to Tk."""
 
+    # Process output can arrive in large bursts. Limit each Tk callback so it
+    # can return to the event loop regularly and keep the window responsive.
+    MAX_LINES_PER_DRAIN = 200
+
     def __init__(self) -> None:
         self.process: Optional[subprocess.Popen] = None
         self.reader_threads: List[threading.Thread] = []
@@ -163,11 +167,13 @@ class ProcessRunner:
     def _drain_queue(self) -> None:
         self.after_id = None
         exit_code: Optional[int] = None
-        while True:
+        drained = 0
+        while drained < self.MAX_LINES_PER_DRAIN:
             try:
                 item = self.queue.get_nowait()
             except queue.Empty:
                 break
+            drained += 1
             kind = item[0]
             if kind == "line":
                 _, level, message = item

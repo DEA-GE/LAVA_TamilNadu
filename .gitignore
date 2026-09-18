@@ -108,6 +108,7 @@
 !snakemake/rules/energy_profiles.smk
 !snakemake/rules/weather_data_prep.smk
 !snakemake/rules/weather_bias_adjust.smk
+!snakemake/rules/timeseries.smk
 # --- MkDocs docs ---
 !mkdocs.yml
 !docs
