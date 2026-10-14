@@ -81,7 +81,8 @@
 !configs
 !configs/config_template.yaml
 !configs/advanced_settings/advanced_data_prep_settings_template.yaml
-!configs/config_snakemake.yaml
+# Local Snakemake configuration (machine-specific)
+configs/config_snakemake.yaml
 !configs/onshorewind_template.yaml
 !configs/solar_template.yaml
 !configs/examples
