@@ -56,13 +56,13 @@ SNAKEFILE_TEMPLATE = """"""
 SNAKEMAKE_STAGE_KEYS = [stage["key"] for stage in CONFIG_SNAKEMAKE_STAGE_FLAGS]
 CONFIGURATION_CATEGORIES = (
     "General", "Technology exclusions", "Suitability", "Workflow",
-    "Regional turbines", "Advanced settings", "Snakefile",
+    "Advanced settings", "Snakefile",
 )
 DOCUMENT_CATEGORIES = {
     "config.yaml": "General", "onshorewind.yaml": "Technology exclusions",
     "solar.yaml": "Technology exclusions", "offshorewind.yaml": "Technology exclusions",
     "suitability.yaml": "Suitability", "config_snakemake.yaml": "Workflow",
-    "region_turbine_types.yaml": "Regional turbines",
+    "region_turbine_types.yaml": "Advanced settings",
     "advanced_data_prep_settings.yaml": "Advanced settings", "Snakefile": "Snakefile",
 }
 PARAMETER_CHOICES: Dict[str, List[str]] = {
@@ -755,6 +755,8 @@ class ConfigurationTab(ttk.Frame):
                 self.snakefile_text.edit_reset()
         self.advanced_tab = self.category_tabs["Advanced settings"]
         self.advanced_tab.columnconfigure(0, weight=1)
+        self.advanced_tab.columnconfigure(1, weight=0)
+        self.advanced_tab.columnconfigure(2, weight=1)
         self.advanced_tab.rowconfigure(0, weight=1)
         self.document_tabs["advanced_data_prep_settings.yaml"] = self.advanced_tab
         self.document_tab_notebooks["advanced_data_prep_settings.yaml"] = notebook
@@ -826,6 +828,31 @@ class ConfigurationTab(ttk.Frame):
                 owner_notebook = notebook
                 file_frame = self.category_tabs[category]
                 tab_title = category
+                if label == "region_turbine_types.yaml":
+                    separator = ttk.Separator(
+                        self.advanced_tab, orient="vertical"
+                    )
+                    separator.grid(row=0, column=1, sticky="ns", pady=10)
+                    region_container = ttk.Frame(self.advanced_tab)
+                    region_container.grid(
+                        row=0,
+                        column=2,
+                        sticky="nsew",
+                        padx=(6, 10),
+                        pady=10,
+                    )
+                    region_container.columnconfigure(0, weight=1)
+                    region_container.rowconfigure(1, weight=1)
+                    ttk.Label(
+                        region_container,
+                        text=label,
+                        font=("Segoe UI", 10, "bold"),
+                    ).grid(row=0, column=0, sticky="w", pady=(0, 6))
+                    file_frame = ttk.Frame(region_container)
+                    file_frame.grid(row=1, column=0, sticky="nsew")
+                    file_frame.columnconfigure(0, weight=1)
+                    file_frame.rowconfigure(0, weight=1)
+                    tab_title = category
             file_frame.columnconfigure(0, weight=1)
             file_frame.rowconfigure(0, weight=1)
             info["tab_frame"] = file_frame

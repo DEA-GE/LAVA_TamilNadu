@@ -22,7 +22,12 @@ with open("configs/config_snakemake.yaml", "r", encoding="utf-8") as f:
 with open("configs/config.yaml", "r", encoding="utf-8") as f:
     config_main = yaml.load(f, Loader=yaml.FullLoader)
 
-region_turbine_types_file = config_snakemake.get("region_turbine_types_file")
+use_custom_turbines = bool(config_snakemake.get("use_custom_turbines", False))
+region_turbine_types_file = (
+    config_snakemake.get("region_turbine_types_file")
+    if use_custom_turbines
+    else None
+)
 region_turbines = {}
 if region_turbine_types_file:
     region_turbine_types_path = Path(region_turbine_types_file)
@@ -211,24 +216,18 @@ if stages.get("suitability"):
     )
 
 if stages.get("timeseries"):
-    for technology in technologies:
-        tech_scenarios = get_scenarios_for_technology(technology)
-        ALL_TARGETS += expand(
-            logpath("{region}", "timeseries_{technology}_{weather_year}_{scenario}.done"),
-            region=regions,
-            technology=[technology],
-            weather_year=weather_years,
-            scenario=tech_scenarios,
-        )
-
-    # Regional turbine runs are additive. The original timeseries targets above
-    # remain unchanged, while this optional mapping creates one extra target per
-    # configured turbine and region.
     wind_technologies = {"onshorewind", "offshorewind", "onwind", "offwind"}
     for technology in technologies:
-        if technology not in wind_technologies:
-            continue
         tech_scenarios = get_scenarios_for_technology(technology)
+        if not use_custom_turbines or technology not in wind_technologies:
+            ALL_TARGETS += expand(
+                logpath("{region}", "timeseries_{technology}_{weather_year}_{scenario}.done"),
+                region=regions,
+                technology=[technology],
+                weather_year=weather_years,
+                scenario=tech_scenarios,
+            )
+            continue
         for region in regions:
             selected_turbines = turbines_for_region(region)
             if not selected_turbines:

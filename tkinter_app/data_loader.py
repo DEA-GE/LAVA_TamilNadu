@@ -1239,6 +1239,14 @@ CONFIG_SNAKEMAKE_SECTION_DEFINITIONS: List[Dict[str, Any]] = [
                 ),
             },
             {
+                "key": "use_custom_turbines",
+                "type": "boolean",
+                "description": (
+                    "Use the regional custom turbine mapping for all selected "
+                    "regions instead of the default turbine configuration."
+                ),
+            },
+            {
                 "key": "weather_years",
                 "type": "string",
                 "description": (
@@ -1995,7 +2003,9 @@ def validate_configuration_documents(
                 "Snakefile path is required.",
             )
         region_turbine_types_file = snakemake.get("region_turbine_types_file")
-        if nonempty(region_turbine_types_file):
+        if enabled(snakemake.get("use_custom_turbines")) and nonempty(
+            region_turbine_types_file
+        ):
             mapping_path = Path(configs_path).parent / str(region_turbine_types_file)
             if not mapping_path.exists():
                 add(
