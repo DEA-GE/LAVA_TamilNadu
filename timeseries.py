@@ -6,6 +6,7 @@ import numpy as np
 import xarray as xr
 import pandas as pd
 import geopandas as gpd
+import copy
 import os
 import yaml
 import logging
@@ -24,8 +25,8 @@ dirname = os.getcwd()
 # --- Helper function to load custom or atlite turbine/panel files ---
 def load_turbine_or_panel(name, dirname):
     """
-    Load turbine or panel from custom configs/advanced_settings folder first,
-    then fall back to atlite's internal files.
+    Load turbine or panel from the custom atlite parameter folder, or let atlite
+    resolve its built-in resource name.
 
     Args:
         name: Name of the turbine/panel (e.g., "HW_farm", "Vestas_V112_3MW", "CSi")
@@ -37,11 +38,16 @@ def load_turbine_or_panel(name, dirname):
     if name is None:
         return None
 
-    # Check if custom file exists in advanced_settings folder
-    custom_path = os.path.join(dirname, "configs/advanced_settings", f"{name}.yaml")
-    if os.path.exists(custom_path):
+    custom_path = (
+        Path(dirname)
+        / "configs"
+        / "advanced_settings"
+        / "custom_tech_param_atlite"
+        / f"{name}.yaml"
+    )
+    if custom_path.is_file():
         logging.info(f"    Loading custom turbine/panel from: {custom_path}")
-        return Path(custom_path)
+        return custom_path
 
     # Fall back to atlite's internal files (pass name as string)
     logging.info(f"    Using atlite internal turbine/panel: {name}")
@@ -70,6 +76,14 @@ parser.add_argument(
         "'technology' value in config.yaml."
     ),
 )
+parser.add_argument(
+    "--turbine",
+    default=None,
+    help=(
+        "Optional turbine name that overrides the turbine configured for the "
+        "selected wind technology."
+    ),
+)
 args = parser.parse_args()
 
 if args.scenario is None:
@@ -91,6 +105,9 @@ technology_aliases = {
 profile_technology = technology_aliases.get(
     technology_exclusion, technology_exclusion
 )
+
+if args.turbine is not None and profile_technology not in {"onwind", "offwind"}:
+    parser.error("--turbine can only be used with a wind technology.")
 
 logging.info(
     f"region={study_region_name}, year={year}, scenario={scenario}, technology={technology_exclusion}"
@@ -217,6 +234,13 @@ for tech_name in enabled_techs:
     func = getattr(cutout, method)
     resource["show_progress"] = show_progress
 
+    if args.turbine is not None:
+        if "turbine" not in resource:
+            raise ValueError(
+                f"Technology '{tech_name}' has no turbine resource to override."
+            )
+        resource["turbine"] = args.turbine
+
     # Load custom or atlite turbine/panel files
     if "turbine" in resource:
         resource["turbine"] = load_turbine_or_panel(resource["turbine"], dirname)
@@ -257,9 +281,11 @@ for tech_name in enabled_techs:
         df = df * max_wind_speed
     ####
 
+    turbine_suffix = f"_{args.turbine}" if args.turbine else ""
     out_file = os.path.join(
         output_dir,
-        f"{study_region_name}_{technology_exclusion}_{scenario}_profile_{year}.csv",
+        f"{study_region_name}_{technology_exclusion}_{scenario}_profile_{year}"
+        f"{turbine_suffix}.csv",
     )
     df.to_csv(out_file)
 
@@ -274,7 +300,8 @@ logging.info("Done — all profiles generated.")
 # --- Save technologies dictionary, shapes filename, and cutout name to a text file ---
 tech_file = os.path.join(
     output_dir,
-    f"technologies_{technology_exclusion}_{scenario}_{year}.txt",
+    f"technologies_{technology_exclusion}_{scenario}_{year}"
+    f"{turbine_suffix}.txt",
 )
 with open(tech_file, "w", encoding="utf-8") as f:
     f.write(f"shapes_file: {os.path.basename(shapes_path)}\n")
@@ -282,8 +309,11 @@ with open(tech_file, "w", encoding="utf-8") as f:
     f.write("technologies:\n")
     import yaml
 
+    technology_metadata = copy.deepcopy(technologies[profile_technology])
+    if args.turbine is not None:
+        technology_metadata["resource"]["turbine"] = args.turbine
     yaml.dump(
-        {profile_technology: technologies[profile_technology]},
+        {profile_technology: technology_metadata},
         f,
         allow_unicode=True,
         default_flow_style=False,

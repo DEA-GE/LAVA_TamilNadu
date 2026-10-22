@@ -1231,6 +1231,14 @@ CONFIG_SNAKEMAKE_SECTION_DEFINITIONS: List[Dict[str, Any]] = [
                 "description": "Path to the Snakemake file.",
             },
             {
+                "key": "region_turbine_types_file",
+                "type": "string",
+                "description": (
+                    "Optional path to the region-to-turbine YAML mapping used by "
+                    "regional custom turbine timeseries jobs."
+                ),
+            },
+            {
                 "key": "weather_years",
                 "type": "string",
                 "description": (
@@ -1986,6 +1994,16 @@ def validate_configuration_documents(
                 "snakefile",
                 "Snakefile path is required.",
             )
+        region_turbine_types_file = snakemake.get("region_turbine_types_file")
+        if nonempty(region_turbine_types_file):
+            mapping_path = Path(configs_path).parent / str(region_turbine_types_file)
+            if not mapping_path.exists():
+                add(
+                    "error",
+                    "config_snakemake.yaml",
+                    "region_turbine_types_file",
+                    f"Regional turbine mapping file not found: {mapping_path}.",
+                )
         technologies = snakemake.get("technologies", [])
         if isinstance(technologies, str):
             technologies = [technologies]

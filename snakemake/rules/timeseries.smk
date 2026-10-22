@@ -42,3 +42,29 @@ rule timeseries:
             "--weather_year {wildcards.weather_year} "
             "--scenario {wildcards.scenario}"
         )
+
+
+rule timeseries_custom_turbine:
+    input:
+        spatial=Path("data") / "{region}" / "{region}_local_CRS.pkl",
+        weather=timeseries_weather_input,
+        raster=timeseries_raster_input,
+        turbine_mapping=timeseries_turbine_mapping_input,
+        turbine_config=timeseries_turbine_config_input,
+    output:
+        profile=Path("data")
+        / "{region}"
+        / "0_profiles"
+        / "{region}_{technology}_{scenario}_profile_{weather_year}_{turbine}.csv",
+        done=touch(logpath(
+            "{region}",
+            "custom_timeseries_{technology}_{turbine}_{weather_year}_{scenario}.done",
+        )),
+    shell:
+        (
+            "python timeseries.py --region {wildcards.region} "
+            "--technology {wildcards.technology} "
+            "--weather_year {wildcards.weather_year} "
+            "--scenario {wildcards.scenario} "
+            "--turbine {wildcards.turbine}"
+        )

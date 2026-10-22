@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: CC-BY-4.0
+
+# Turbine characteristic data
+# Balancing-area power curve converted from MW to kW for atlite.
+name: VILaggPC
+manufacturer: Generic (balancing-area curve)
+source: Tamil_Nadu_PowerCurves.txt
+
+# Hub height in meters
+HUB_HEIGHT: 100
+# Power curve, specified as lists of velocities and powers.
+# Power curve velocities in m/s
+V: [ 0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5,
+     6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5,
+     12, 12.5, 13, 13.5, 14, 14.5, 15, 15.5, 16, 16.5, 17, 17.5,
+     18, 18.5, 19, 19.5, 20, 20.5, 21, 21.5, 22, 22.5, 23, 23.5,
+     24, 24.5, 25, 25.5, 26, 26.5, 27, 27.5, 28, 28.5, 29, 29.5,
+     30 ]
+# Generated power in kW
+POW: [ 0, 0, 0, 0, 0, 3.4928, 8.1424, 21.5376, 40.1344, 65.7424, 98.2864, 136.1088,
+        182.6016, 233.8176, 298.9072, 367.0112, 455.3472, 543.832, 660.064, 776.2944, 917.1024, 1061.2288, 1177.9152, 1285.7776,
+        1371.8848, 1445.3424, 1500.3776, 1537.5712, 1567.6288, 1586.2272, 1600, 1600, 1600, 1600, 1600, 1600,
+        1600, 1600, 1600, 1600, 1600, 1600, 1600, 1600, 1600, 1600, 1600, 1600,
+        1600, 1600, 1600, 1600, 1600, 1600, 256.7328, 0, 0, 0, 0, 0,
+        0 ]
+

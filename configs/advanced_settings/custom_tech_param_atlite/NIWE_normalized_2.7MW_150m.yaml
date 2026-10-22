@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: CC-BY-4.0
+
+# Turbine characteristic data
+# This is a digitized approximation of Figure 9, not an official tabulated curve.
+name: NIWE normalized 2.7 MW turbine for the 150 m wind potential assessment
+# The curve is an average of nine modern turbines above 2 MW.
+manufacturer: Generic (NIWE normalized average)
+# NIWE, Assessment of Wind Energy Potential in India at 150 m AGL
+source: https://maps.niwe.res.in/media/150m-report.pdf
+
+# Hub height in meters
+HUB_HEIGHT: 150
+# NIWE reports a representative rotor diameter of 131 m.
+
+# Power curve, specified as lists of velocities and powers.
+# Values at 0.25 m/s intervals are linearly interpolated from digitized
+# integer-speed values in Figure 9. Cut-out immediately above 25 m/s is
+# inferred because the report does not publish values beyond 25 m/s.
+# Power curve velocities in m/s
+V: [ 0.00, 0.25, 0.50, 0.75, 1.00, 1.25, 1.50, 1.75, 2.00,
+     2.25, 2.50, 2.75, 3.00, 3.25, 3.50, 3.75, 4.00, 4.25,
+     4.50, 4.75, 5.00, 5.25, 5.50, 5.75, 6.00, 6.25, 6.50,
+     6.75, 7.00, 7.25, 7.50, 7.75, 8.00, 8.25, 8.50, 8.75,
+     9.00, 9.25, 9.50, 9.75, 10.00, 10.25, 10.50, 10.75, 11.00,
+     11.25, 11.50, 11.75, 12.00, 12.25, 12.50, 12.75, 13.00, 13.25,
+     13.50, 13.75, 14.00, 14.25, 14.50, 14.75, 15.00, 15.25, 15.50,
+     15.75, 16.00, 16.25, 16.50, 16.75, 17.00, 17.25, 17.50, 17.75,
+     18.00, 18.25, 18.50, 18.75, 19.00, 19.25, 19.50, 19.75, 20.00,
+     20.25, 20.50, 20.75, 21.00, 21.25, 21.50, 21.75, 22.00, 22.25,
+     22.50, 22.75, 23.00, 23.25, 23.50, 23.75, 24.00, 24.25, 24.50,
+     24.75, 25.00, 25.01 ]
+# Generated power in kW
+POW: [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+       0, 30, 67, 105, 142, 179, 241, 303, 364, 426, 514,
+       602, 690, 778, 898, 1018, 1138, 1258, 1405, 1553, 1700, 1847,
+       1986, 2124, 2263, 2401, 2460, 2520, 2579, 2638, 2651, 2664, 2676,
+       2689, 2691, 2693, 2695, 2697, 2698, 2699, 2700, 2701, 2701, 2701,
+       2701, 2701, 2701, 2701, 2701, 2701, 2701, 2701, 2701, 2701, 2701,
+       2701, 2701, 2701, 2701, 2701, 2701, 2701, 2701, 2701, 2701, 2701,
+       2701, 2701, 2701, 2701, 2701, 2701, 2701, 2701, 2701, 2701, 2701,
+       2701, 2701, 2701, 2701, 2701, 2701, 2701, 2701, 2701, 2701, 2700,
+       2700, 2699, 0 ]

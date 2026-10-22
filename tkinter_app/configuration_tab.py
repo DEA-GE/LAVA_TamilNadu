@@ -56,12 +56,13 @@ SNAKEFILE_TEMPLATE = """"""
 SNAKEMAKE_STAGE_KEYS = [stage["key"] for stage in CONFIG_SNAKEMAKE_STAGE_FLAGS]
 CONFIGURATION_CATEGORIES = (
     "General", "Technology exclusions", "Suitability", "Workflow",
-    "Advanced settings", "Snakefile",
+    "Regional turbines", "Advanced settings", "Snakefile",
 )
 DOCUMENT_CATEGORIES = {
     "config.yaml": "General", "onshorewind.yaml": "Technology exclusions",
     "solar.yaml": "Technology exclusions", "offshorewind.yaml": "Technology exclusions",
     "suitability.yaml": "Suitability", "config_snakemake.yaml": "Workflow",
+    "region_turbine_types.yaml": "Regional turbines",
     "advanced_data_prep_settings.yaml": "Advanced settings", "Snakefile": "Snakefile",
 }
 PARAMETER_CHOICES: Dict[str, List[str]] = {
@@ -83,6 +84,7 @@ PARAMETER_PICKERS: Dict[str, str] = {
     "additional_inclusion_polygons_folder_name": "folder_name",
     "additional_inclusion_rasters_folder_name": "folder_name",
     "OSM_folder_name": "folder_name", "snakefile": "project_file",
+    "region_turbine_types_file": "project_file",
 }
 PARAMETER_FOLDER_ROOTS: Dict[str, Path] = {
     "additional_exclusion_polygons_folder_name": (
@@ -1767,6 +1769,12 @@ class ConfigurationTab(ttk.Frame):
                 CONFIGS_DIR / "config_snakemake.yaml",
                 load_snakemake_sections,
                 "config_snakemake",
+            ),
+            (
+                "region_turbine_types.yaml",
+                CONFIGS_DIR / "advanced_settings" / "region_turbine_types.yaml",
+                None,
+                "generic",
             ),
         ]
         for label, expected_path, section_loader, kind in specs:

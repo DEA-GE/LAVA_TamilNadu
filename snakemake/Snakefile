@@ -22,6 +22,23 @@ with open("configs/config_snakemake.yaml", "r", encoding="utf-8") as f:
 with open("configs/config.yaml", "r", encoding="utf-8") as f:
     config_main = yaml.load(f, Loader=yaml.FullLoader)
 
+region_turbine_types_file = config_snakemake.get("region_turbine_types_file")
+region_turbines = {}
+if region_turbine_types_file:
+    region_turbine_types_path = Path(region_turbine_types_file)
+    if not region_turbine_types_path.is_file():
+        raise FileNotFoundError(
+            "Regional turbine mapping file not found: "
+            f"{region_turbine_types_path}"
+        )
+    with open(region_turbine_types_path, "r", encoding="utf-8") as f:
+        region_turbine_config = yaml.load(f, Loader=yaml.FullLoader) or {}
+    region_turbines = region_turbine_config.get("region_turbines", {})
+    if not isinstance(region_turbines, dict):
+        raise ValueError(
+            "The 'region_turbines' entry must be a mapping of region to turbine names."
+        )
+
 
 #define parameters , keep them in list as it iterates, multiple input can be included. 
 configured_regions = config_snakemake["study_region_name"]
@@ -50,6 +67,34 @@ def get_scenarios_for_technology(technology):
 
 def configured_region_name(cleaned_region):
     return region_names[cleaned_region]
+
+
+def turbines_for_region(region):
+    selected = region_turbines.get(region, [])
+    if isinstance(selected, str):
+        selected = [selected]
+    if not isinstance(selected, (list, tuple)):
+        raise ValueError(
+            f"Turbines for region '{region}' must be a list or a single turbine name."
+        )
+    return list(dict.fromkeys(str(turbine).strip() for turbine in selected if str(turbine).strip()))
+
+
+def timeseries_turbine_mapping_input(wildcards):
+    return region_turbine_types_file or []
+
+
+def timeseries_turbine_config_input(wildcards):
+    turbine = wildcards.turbine
+    candidate = (
+        Path("configs/advanced_settings/custom_tech_param_atlite")
+        / f"{turbine}.yaml"
+    )
+    if candidate.is_file():
+        return candidate.as_posix()
+    raise FileNotFoundError(
+        f"Custom turbine YAML not found for '{turbine}'. Checked: {candidate}"
+    )
 
 
 def exclusion_result_targets():
@@ -175,6 +220,30 @@ if stages.get("timeseries"):
             weather_year=weather_years,
             scenario=tech_scenarios,
         )
+
+    # Regional turbine runs are additive. The original timeseries targets above
+    # remain unchanged, while this optional mapping creates one extra target per
+    # configured turbine and region.
+    wind_technologies = {"onshorewind", "offshorewind", "onwind", "offwind"}
+    for technology in technologies:
+        if technology not in wind_technologies:
+            continue
+        tech_scenarios = get_scenarios_for_technology(technology)
+        for region in regions:
+            selected_turbines = turbines_for_region(region)
+            if not selected_turbines:
+                continue
+            ALL_TARGETS += expand(
+                logpath(
+                    "{region}",
+                    "custom_timeseries_{technology}_{turbine}_{weather_year}_{scenario}.done",
+                ),
+                region=[region],
+                technology=[technology],
+                turbine=selected_turbines,
+                weather_year=weather_years,
+                scenario=tech_scenarios,
+            )
 
 
 if stages.get("weather_data_prep"):
