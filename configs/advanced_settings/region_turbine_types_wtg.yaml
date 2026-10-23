@@ -1,0 +1,69 @@
+# Mapping of study regions to the turbine types listed in WTG_Dictionary.txt.
+# WTG labels (WTG A, WTG B, etc.) are intentionally omitted.
+# Turbine names correspond to YAML filenames in:
+# configs/advanced_settings/custom_tech_param_atlite/
+
+region_turbines:
+  ChennaiNorth:
+    - Legacyfleetunspecified250kW
+    - EnerconE48800kW
+    - SuzlonS661250
+    - VestasV821650
+    - GE27132
+  ChennaiSouth:
+    - Legacyfleetunspecified250kW
+    - EnerconE48800kW
+    - SuzlonS661250
+    - VestasV821650
+  Vellore:
+    - Legacyfleetunspecified250kW
+    - EnerconE48800kW
+    - SuzlonS661250
+    - VestasV821650
+    - GE27132
+  Villupuram:
+    - EnerconE48800kW
+  Erode:
+    - Legacyfleetunspecified250kW
+    - EnerconE48800kW
+    - SuzlonS661250
+    - VestasV821650
+    - GE27132
+  Trichy:
+    - Legacyfleetunspecified250kW
+    - EnerconE48800kW
+    - SuzlonS661250
+    - VestasV821650
+    - GE27132
+    - NordexAW1403000
+    - TataKarur36MW
+  Coimbatore:
+    - Legacyfleetunspecified250kW
+    - SuzlonS52600
+    - EnerconE48800kW
+    - SuzlonS661250
+    - ReGenVensys7715MW
+    - VestasV821650
+    - VestasV1202000
+    - GE27132
+  Madurai:
+    - Legacyfleetunspecified250kW
+    - EnerconE48800kW
+    - GamesaG58850
+    - SuzlonS661250
+    - VestasV821650
+    - GE27132
+  Tirunelveli:
+    - Legacyfleetunspecified250kW
+    - SuzlonS52600
+    - NEGMiconNM48750
+    - EnerconE48800kW
+    - SuzlonS661250
+    - ReGenVensys7715MW
+    - VestasV821650
+    - VestasV1202000
+    - SuzlonS1112100
+    - GE24116Maniyachi
+    - GE27132
+    - EnvisionEN15633
+    - WEGAGW14742Vadalivilai
