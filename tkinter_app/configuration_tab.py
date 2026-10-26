@@ -818,7 +818,9 @@ class ConfigurationTab(ttk.Frame):
         )
         self._load_advanced_settings()
         for label, info in self.extra_files.items():
-            category = DOCUMENT_CATEGORIES.get(label, "Technology exclusions")
+            category = info.get("category") or DOCUMENT_CATEGORIES.get(
+                label, "Technology exclusions"
+            )
             if category == "Technology exclusions":
                 owner_notebook = self.technology_notebook
                 file_frame = ttk.Frame(owner_notebook)
@@ -828,7 +830,7 @@ class ConfigurationTab(ttk.Frame):
                 owner_notebook = notebook
                 file_frame = self.category_tabs[category]
                 tab_title = category
-                if label == "region_turbine_types.yaml":
+                if info.get("role") == "region_turbine_types":
                     separator = ttk.Separator(
                         self.advanced_tab, orient="vertical"
                     )
@@ -843,11 +845,13 @@ class ConfigurationTab(ttk.Frame):
                     )
                     region_container.columnconfigure(0, weight=1)
                     region_container.rowconfigure(1, weight=1)
-                    ttk.Label(
+                    title_label = ttk.Label(
                         region_container,
                         text=label,
                         font=("Segoe UI", 10, "bold"),
-                    ).grid(row=0, column=0, sticky="w", pady=(0, 6))
+                    )
+                    title_label.grid(row=0, column=0, sticky="w", pady=(0, 6))
+                    info["title_label"] = title_label
                     file_frame = ttk.Frame(region_container)
                     file_frame.grid(row=1, column=0, sticky="nsew")
                     file_frame.columnconfigure(0, weight=1)
@@ -1774,6 +1778,7 @@ class ConfigurationTab(ttk.Frame):
 
     def _load_additional_files(self) -> Dict[str, Dict[str, Any]]:
         entries: Dict[str, Dict[str, Any]] = {}
+        region_mapping_path = self._configured_region_turbine_mapping_path()
         specs = [
             (
                 "onshorewind.yaml",
@@ -1798,16 +1803,18 @@ class ConfigurationTab(ttk.Frame):
                 "config_snakemake",
             ),
             (
-                "region_turbine_types.yaml",
-                CONFIGS_DIR / "advanced_settings" / "region_turbine_types.yaml",
+                region_mapping_path.name,
+                region_mapping_path,
                 None,
-                "generic",
+                "region_turbine_types",
             ),
         ]
         for label, expected_path, section_loader, kind in specs:
-            if not expected_path.exists():
+            if not expected_path.exists() and kind != "region_turbine_types":
                 continue
-            existing_path: Optional[Path] = expected_path
+            existing_path: Optional[Path] = (
+                expected_path if expected_path.exists() else None
+            )
             try:
                 content = expected_path.read_text(encoding="utf-8")
             except OSError:
@@ -1830,8 +1837,42 @@ class ConfigurationTab(ttk.Frame):
                 "raw_frame": None,
                 "param_controls": [],
                 "kind": kind,
+                "category": "Advanced settings" if kind == "region_turbine_types" else None,
+                "role": kind,
             }
         return entries
+
+    @staticmethod
+    def _resolve_project_path(value: Any, default: Path) -> Path:
+        """Resolve a project-relative path while keeping configured paths usable."""
+        if value in (None, ""):
+            return default
+        candidate = Path(str(value).strip())
+        if candidate.is_absolute():
+            return candidate
+        project_candidate = PARENT_DIR / candidate
+        if project_candidate.exists():
+            return project_candidate
+        configs_candidate = CONFIGS_DIR / candidate
+        if configs_candidate.exists():
+            return configs_candidate
+        return project_candidate
+
+    def _configured_region_turbine_mapping_path(self) -> Path:
+        """Return the mapping file selected in config_snakemake.yaml."""
+        default = CONFIGS_DIR / "advanced_settings" / "region_turbine_types.yaml"
+        config_path = CONFIGS_DIR / "config_snakemake.yaml"
+        if yaml is None or not config_path.exists():
+            return default
+        try:
+            document = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            return default
+        if not isinstance(document, MappingABC):
+            return default
+        return self._resolve_project_path(
+            document.get("region_turbine_types_file"), default
+        )
 
     def _detect_language_for_label(self, label: str) -> str:
         """Return a best-guess language identifier for syntax highlighting."""
@@ -2700,6 +2741,12 @@ class ConfigurationTab(ttk.Frame):
             "scenarios": scenarios,
             "cores": cores_value,
             "snakefile": snakefile_value,
+            "region_turbine_types_file": _stringify(
+                flat.get("region_turbine_types_file", "")
+            ),
+            "use_custom_turbines": self._coerce_boolean_value(
+                flat.get("use_custom_turbines", False), default=False
+            ),
             "weather_years": weather_years,
             "stages": stages,
         }
@@ -2717,6 +2764,8 @@ class ConfigurationTab(ttk.Frame):
             f"scenarios: {data['scenarios']}\n"
             f"cores: {data['cores']}\n"
             f"snakefile: {data['snakefile']}\n"
+            f"region_turbine_types_file: {data['region_turbine_types_file']}\n"
+            f"use_custom_turbines: {data['use_custom_turbines']}\n"
             f"weather_years: {data['weather_years']}\n"
             f"stages: {data['stages']}\n"
         )
@@ -2741,6 +2790,8 @@ class ConfigurationTab(ttk.Frame):
             "technologies": self._coerce_sequence_value(data.get("technologies", [])),
             "scenarios": self._coerce_sequence_value(data.get("scenarios", [])),
             "technology_scenarios": data.get("technology_scenarios", {}),
+            "region_turbine_types_file": data.get("region_turbine_types_file", ""),
+            "use_custom_turbines": data.get("use_custom_turbines", False),
             "weather_years": self._coerce_sequence_value(data.get("weather_years", [])),
         }
         stages = data.get("stages") or {}
@@ -3179,12 +3230,72 @@ class ConfigurationTab(ttk.Frame):
             app = self.master.master
             if hasattr(app, "run_tab"):
                 app.run_tab._refresh_snakemake_settings_display()
+            self._refresh_region_turbine_mapping_editor()
         status_label = info.get("status_label")
         if status_label:
             status_label.configure(text=f"Saved to {save_path.name}")
         self._refresh_dirty_state_ui()
         self._show_save_confirmation(f"Saved {label}")
         return True
+
+    def _refresh_region_turbine_mapping_editor(self) -> None:
+        """Point the regional mapping editor at the configured mapping filename."""
+        mapping_items = [
+            (label, info)
+            for label, info in self.extra_files.items()
+            if info.get("role") == "region_turbine_types"
+        ]
+        if not mapping_items:
+            return
+        _label, info = mapping_items[0]
+        workflow_info = self.extra_files.get("config_snakemake.yaml")
+        selected_value = None
+        if workflow_info:
+            for section in workflow_info.get("sections") or []:
+                for parameter in section.get("parameters", []):
+                    if parameter.get("key") == "region_turbine_types_file":
+                        selected_value = parameter.get("value")
+                        break
+        mapping_path = self._resolve_project_path(
+            selected_value,
+            CONFIGS_DIR / "advanced_settings" / "region_turbine_types.yaml",
+        )
+        current_path = info.get("path") or info.get("save_path")
+        if current_path and Path(current_path).resolve() == mapping_path.resolve():
+            return
+        try:
+            content = (
+                mapping_path.read_text(encoding="utf-8")
+                if mapping_path.exists()
+                else ""
+            )
+        except OSError:
+            content = ""
+        info["path"] = mapping_path if mapping_path.exists() else None
+        info["save_path"] = mapping_path
+        info["expected_path"] = mapping_path
+        info["baseline"] = content
+        info["dirty"] = False
+        text_widget = info.get("text_widget")
+        if text_widget is not None:
+            text_widget.delete("1.0", "end")
+            text_widget.insert("1.0", content)
+            text_widget.edit_reset()
+            highlighter = info.get("highlighter")
+            if isinstance(highlighter, TextSyntaxHighlighter):
+                highlighter.refresh()
+        title_label = info.get("title_label")
+        if title_label is not None:
+            title_label.configure(text=mapping_path.name)
+        status_label = info.get("status_label")
+        if status_label is not None:
+            status_label.configure(
+                text=(
+                    f"Loaded from {mapping_path.name}"
+                    if mapping_path.exists()
+                    else f"Saving to {mapping_path.name}"
+                )
+            )
 
     def _reset_extra_file(self, label: str) -> None:
         info = self.extra_files.get(label)
